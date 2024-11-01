@@ -12,16 +12,14 @@ module Image.Internal.ImageData exposing
     , map
     , toArray
     , toArray2d
-    , toList
-    , toList2d
     , toPalette
     , width
     )
 
-import Array exposing (Array)
-import Dict
+import Dict exposing ( Dict )
 import Image.Internal.Array2d exposing (Array2d)
 import Image.Internal.Meta as Metadata exposing (BmpBitsPerPixel(..), FromDataColor(..), Header(..), PngColor(..))
+import Image.Internal.Util as Util
 
 
 type Image
@@ -39,34 +37,34 @@ eval image =
             image
 
 
-toPalette : Image -> ( Array Int, Array Int )
+toPalette : Image -> { v1 : Array Int, v2 : Array Int }
 toPalette image =
     image
         |> toArray
         |> Array.foldl
-            (\px ( palette, indexes ) ->
+            (\px { v1 = palette, v2 = indexes } ->
                 let
                     i =
                         Dict.get px palette
                 in
                 case i of
                     Just index ->
-                        ( palette, Array.push index indexes )
+                        { v1 = palette, v2 = Array.pushLast index indexes }
 
                     Nothing ->
                         let
                             index =
-                                Dict.size palette
+                                Dict.count palette
                         in
-                        ( Dict.insert px index palette, Array.push index indexes )
+                        { v1 = Dict.set px index palette, v2 = Array.pushLast index indexes }
             )
-            ( Dict.empty, Array.empty )
-        |> Tuple.mapFirst
+            { v1 = Dict.empty, v2 = Array.empty }
+        |> Util.tupleMapFirst
             (\p ->
                 p
-                    |> Dict.toList
-                    |> List.sortBy Tuple.second
-                    |> List.foldl (Tuple.first >> Array.push) Array.empty
+                    |> Util.dictToArray
+                    |> Array.sortBy Util.tupleSecond
+                    |> Array.foldl (Util.tupleFirst >> Array.pushLast) Array.empty
             )
 
 
@@ -133,42 +131,6 @@ map fn image =
 
                 newData ->
                     map fn newData
-
-
-toList : Image -> List Int
-toList image =
-    case image of
-        ImageRaw _ arr ->
-            Array.foldr (\line acc1 -> Array.foldr (\px acc2 -> px :: acc2) acc1 line) [] arr
-
-        Lazy meta fn ->
-            case fn meta of
-                Lazy _ _ ->
-                    []
-
-                newData ->
-                    toList newData
-
-
-toList2d : Image -> List (List Int)
-toList2d info =
-    case info of
-        ImageRaw _ arr ->
-            Array.foldr
-                (\line acc1 ->
-                    Array.foldr (\px acc2 -> px :: acc2) [] line
-                        |> (\l -> l :: acc1)
-                )
-                []
-                arr
-
-        Lazy meta fn ->
-            case fn meta of
-                Lazy _ _ ->
-                    []
-
-                newData ->
-                    toList2d newData
 
 
 toArray : Image -> Array Int

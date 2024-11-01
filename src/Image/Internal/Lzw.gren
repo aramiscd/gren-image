@@ -1,6 +1,5 @@
 module Image.Internal.Lzw exposing (decodeGifList, decoder, encode, encodeGifStream)
 
-import Array exposing (Array)
 import Bytes exposing (Endianness(..))
 import Bytes.Decode as D exposing (Decoder, Step(..))
 import Bytes.Encode as E
@@ -11,11 +10,11 @@ import Image.Internal.Decode as D
 
 
 type alias CodeStream =
-    List Int
+    Array Int
 
 
 type alias Pixels =
-    List Int
+    Array Int
 
 
 decoder : Int -> D.Decoder (Array Int)
@@ -30,7 +29,7 @@ decoder colorCountPowerOfTwo =
                 |> D.andThen
                     (\bytes ->
                         let
-                            ( cc, eoi, table ) =
+                            { v1 = cc, v2 = eoi, v3 = table } =
                                 initDecodeTable colorCountPowerOfTwo
                         in
                         BitReader.readBits firstCodeSize 0
@@ -51,7 +50,7 @@ decoder colorCountPowerOfTwo =
                                                         acc =
                                                             { eoi = eoi -- end of information code
                                                             , table = table
-                                                            , indexStream = Array.fromList value
+                                                            , indexStream = value
                                                             , indexBuffer = value
                                                             , read = firstCodeSize
                                                             }
@@ -78,13 +77,13 @@ bitDecoder ({ eoi, table, indexStream, read, indexBuffer } as acc) =
                         Just v ->
                             let
                                 k =
-                                    List.head v |> Maybe.withDefault -404
+                                    Array.first v |> Maybe.withDefault -404
 
                                 tableValue =
                                     indexBuffer ++ [ k ]
 
                                 tableKey =
-                                    Dict.size table
+                                    Dict.count table
 
                                 newRead =
                                     if tableKey >= 2 ^ read - 1 then
@@ -95,8 +94,8 @@ bitDecoder ({ eoi, table, indexStream, read, indexBuffer } as acc) =
                             in
                             Loop
                                 { acc
-                                    | table = Dict.insert tableKey tableValue table
-                                    , indexStream = Array.append indexStream (Array.fromList v)
+                                    | table = Dict.set tableKey tableValue table
+                                    , indexStream = Array.append indexStream v
                                     , indexBuffer = v
                                     , read = newRead
                                 }
@@ -105,7 +104,7 @@ bitDecoder ({ eoi, table, indexStream, read, indexBuffer } as acc) =
                             let
                                 k =
                                     indexBuffer
-                                        |> List.head
+                                        |> Array.first
                                         |> Maybe.withDefault -404
 
                                 tableValue =
@@ -120,8 +119,8 @@ bitDecoder ({ eoi, table, indexStream, read, indexBuffer } as acc) =
                             in
                             Loop
                                 { acc
-                                    | table = Dict.insert code tableValue table
-                                    , indexStream = Array.append indexStream (Array.fromList tableValue)
+                                    | table = Dict.set code tableValue table
+                                    , indexStream = Array.append indexStream tableValue
                                     , indexBuffer = tableValue
                                     , read = newRead
                                 }
@@ -132,27 +131,32 @@ bitDecoder ({ eoi, table, indexStream, read, indexBuffer } as acc) =
             )
 
 
-decodeGifList : Int -> List Int -> CodeStream
+decodeGifList : Int -> Array Int -> CodeStream
 decodeGifList size data =
     let
-        ( cc, eoi, table ) =
+        { v1 = cc, v2 = eoi, v3 = table } =
             initDecodeTable size
     in
-    case data of
-        _ :: first :: rest ->
-            let
-                value =
-                    Dict.get first table |> Maybe.withDefault []
-            in
-            decodeGifList_ eoi table value rest value
-
-        _ ->
+    case Array.popFirst data of
+        Nothing ->
             []
+
+        Just { first = _, rest = tail } ->
+            case Array.popFirst tail of
+                Just { first, rest } ->
+                    let
+                        value =
+                            Dict.get first table |> Maybe.withDefault []
+                    in
+                    decodeGifList_ eoi table value rest value
+
+                Nothing ->
+                    []
 
 
 decodeGifList_ eoi table indexStream codeStream code__1 =
-    case codeStream of
-        code :: rest ->
+    case Array.popFirst codeStream of
+        Just { first = code, rest = rest } ->
             if code == eoi then
                 indexStream
 
@@ -162,35 +166,35 @@ decodeGifList_ eoi table indexStream codeStream code__1 =
                         let
                             k =
                                 v
-                                    |> List.head
+                                    |> Array.first
                                     |> Maybe.withDefault -404
 
                             tableValue =
                                 code__1 ++ [ k ]
 
                             tableKey =
-                                Dict.size table
+                                Dict.count table
                         in
-                        decodeGifList_ eoi (Dict.insert tableKey tableValue table) (indexStream ++ v) rest v
+                        decodeGifList_ eoi (Dict.set tableKey tableValue table) (indexStream ++ v) rest v
 
                     Nothing ->
                         let
                             k =
                                 code__1
-                                    |> List.head
+                                    |> Array.first
                                     |> Maybe.withDefault -404
 
                             tableValue =
                                 code__1 ++ [ k ]
                         in
-                        decodeGifList_ eoi (Dict.insert code tableValue table) (indexStream ++ tableValue) rest tableValue
+                        decodeGifList_ eoi (Dict.set code tableValue table) (indexStream ++ tableValue) rest tableValue
 
-        _ ->
+        Nothing ->
             indexStream
 
 
 type alias DecodeTable =
-    ( Int, Int, Dict.Dict Int (List Int) )
+    { v1 : Int, v2 : Int, v3 : Dict.Dict Int (Array Int) }
 
 
 initDecodeTable : Int -> DecodeTable
@@ -203,12 +207,12 @@ initDecodeTable lastColorIndex =
             lastColorIndex + 2
 
         table =
-            List.range 0 lastColorIndex
-                |> List.foldl (\k -> Dict.insert k [ k ]) Dict.empty
-                |> Dict.insert cc [ cc ]
-                |> Dict.insert eoi [ eoi ]
+            Array.range 0 lastColorIndex
+                |> Array.foldl (\k -> Dict.set k [ k ]) Dict.empty
+                |> Dict.set cc [ cc ]
+                |> Dict.set eoi [ eoi ]
     in
-    ( cc, eoi, table )
+    { v1 = cc, v2 = eoi, v3 = table }
 
 
 
@@ -216,7 +220,7 @@ initDecodeTable lastColorIndex =
 
 
 type alias EncodeTable =
-    ( Int, Int, Dict.Dict String Int )
+    { v1 : Int, v2 : Int, v3 : Dict.Dict String Int }
 
 
 initEncodeTable : Int -> EncodeTable
@@ -229,25 +233,25 @@ initEncodeTable lastColorIndex =
             lastColorIndex + 2
 
         table =
-            List.range 0 lastColorIndex
-                |> List.foldl (\k -> Dict.insert (String.fromInt k) k) Dict.empty
-                |> Dict.insert (String.fromInt cc) cc
-                |> Dict.insert (String.fromInt eoi) eoi
+            Array.range 0 lastColorIndex
+                |> Array.foldl (\k -> Dict.set (String.fromInt k) k) Dict.empty
+                |> Dict.set (String.fromInt cc) cc
+                |> Dict.set (String.fromInt eoi) eoi
     in
-    ( cc, eoi, table )
+    { v1 = cc, v2 = eoi, v3 = table }
 
 
 encode : Int -> Pixels -> E.Encoder
 encode lastColorIndex data =
     let
-        ( cc, eoi, table ) =
+        { v1 = cc, v2 = eoi, v3 = table } =
             initEncodeTable lastColorIndex
     in
-    case data of
-        [] ->
+    case Array.popFirst data of
+        Nothing ->
             E.sequence []
 
-        i :: rest ->
+        Just { first = i, rest = rest } ->
             let
                 firstCodeSize =
                     lzwCodeSize cc
@@ -265,15 +269,15 @@ encode lastColorIndex data =
             in
             E.sequence
                 [ E.unsignedInt8 firstCodeSize
-                , E.unsignedInt8 (Bytes.width resultBytes)
+                , E.unsignedInt8 (Bytes.length resultBytes)
                 , E.bytes resultBytes
                 ]
 
 
-encode_ : Int -> Dict.Dict String Int -> List Int -> BitWriter -> String -> Int -> BitWriter
+encode_ : Int -> Dict.Dict String Int -> Array Int -> BitWriter -> String -> Int -> BitWriter
 encode_ eoi table input output indexBuffer bytesWritten =
-    case input of
-        k :: rest ->
+    case Array.popFirst input of
+        Just { first = k, rest = rest } ->
             let
                 key =
                     indexBuffer ++ "," ++ String.fromInt k
@@ -282,41 +286,41 @@ encode_ eoi table input output indexBuffer bytesWritten =
                 Nothing ->
                     let
                         tableIndex =
-                            Dict.size table
+                            Dict.count table
 
-                        ( newTable, newOutput ) =
+                        { v1 = newTable, v2 = newOutput } =
                             if tableIndex <= 4095 then
                                 let
                                     newTable_ =
-                                        Dict.insert key tableIndex table
+                                        Dict.set key tableIndex table
 
                                     newOutput_ =
                                         output
                                             |> BitWriter.writeBits (lzwCodeSize tableIndex)
                                                 (Dict.get indexBuffer table |> Maybe.withDefault -404)
                                 in
-                                ( newTable_, newOutput_ )
+                                { v1 = newTable_, v2 = newOutput_ }
 
                             else
                                 let
-                                    ( cc, _, newTable_ ) =
+                                    { v1 = cc, v2 = _, v3 = newTable_ } =
                                         initEncodeTable (eoi - 1)
 
                                     --TODO validate that it works
                                     newOutput_ =
                                         output |> BitWriter.writeBits (lzwCodeSize cc + 1) cc
                                 in
-                                ( newTable_, newOutput_ )
+                                { v1 = newTable_, v2 = newOutput_ }
                     in
                     encode_ eoi newTable rest newOutput (String.fromInt k) bytesWritten
 
                 Just _ ->
                     encode_ eoi table rest output key bytesWritten
 
-        [] ->
+        Nothing ->
             let
                 bitsToWrite =
-                    Dict.size table
+                    Dict.count table
                         |> lzwCodeSize
             in
             output
@@ -363,11 +367,11 @@ lzwCodeSize input =
         0
 
 
-encodeGifStream_ : Int -> Dict.Dict String Int -> List Int -> List Int -> String -> CodeStream
+encodeGifStream_ : Int -> Dict.Dict String Int -> Array Int -> Array Int -> String -> CodeStream
 encodeGifStream_ eoi table data codeStream indexBuffer =
     --https://www.matthewflickinger.com/lab/whatsinagif/lzw_image_data.asp
-    case data of
-        k :: rest ->
+    case Array.popFirst data of
+        Just { first = k, rest = rest } ->
             let
                 key =
                     indexBuffer ++ "," ++ String.fromInt k
@@ -376,34 +380,34 @@ encodeGifStream_ eoi table data codeStream indexBuffer =
                 Nothing ->
                     let
                         newTable =
-                            Dict.insert key (Dict.size table) table
+                            Dict.set key (Dict.count table) table
 
                         newCodeStream =
-                            (Dict.get indexBuffer table |> Maybe.withDefault -404) :: codeStream
+                            Array.pushFirst (Dict.get indexBuffer table |> Maybe.withDefault -404) codeStream
                     in
                     encodeGifStream_ eoi newTable rest newCodeStream (String.fromInt k)
 
                 Just _ ->
                     encodeGifStream_ eoi table rest codeStream key
 
-        [] ->
-            eoi
-                :: (Dict.get indexBuffer table |> Maybe.withDefault -404)
-                :: codeStream
-                |> List.reverse
+        Nothing ->
+            codeStream
+                |> Array.pushFirst (Dict.get indexBuffer table |> Maybe.withDefault -404)
+                |> Array.pushFirst eoi
+                |> Array.reverse
 
 
 encodeGifStream : Int -> Pixels -> CodeStream
 encodeGifStream lastColorIndex data =
     let
-        ( cc, eoi, table ) =
+        { v1 = cc, v2 = eoi, v3 = table } =
             initEncodeTable lastColorIndex
     in
-    case data of
-        [] ->
+    case Array.popFirst data of
+        Nothing ->
             []
 
-        i :: rest ->
+        Just { first = i, rest = rest } ->
             encodeGifStream_ eoi table rest [ cc ] (String.fromInt i)
 
 
@@ -411,15 +415,15 @@ encodeGifStream lastColorIndex data =
 ----DELME PART!!!
 
 
-reverseList : Int -> Decoder a -> Decoder (List a)
+reverseList : Int -> Decoder a -> Decoder (Array a)
 reverseList len decoder_ =
-    D.loop ( len, [] ) (listStep decoder_)
+    D.loop { v1 = len, v2 = [] } (listStep decoder_)
 
 
-listStep : Decoder a -> ( Int, List a ) -> Decoder (Step ( Int, List a ) (List a))
-listStep decoder_ ( n, xs ) =
+listStep : Decoder a -> { v1 : Int, v2 : Array a } -> Decoder (Step { v1 : Int, v2 : Array a } (Array a))
+listStep decoder_ { v1 = n, v2 = xs } =
     if n <= 0 then
         D.succeed (Done xs)
 
     else
-        D.map (\x -> Loop ( n - 1, x :: xs )) decoder_
+        D.map (\x -> Loop { v1 = n - 1, v2 = Array.pushFirst x xs }) decoder_

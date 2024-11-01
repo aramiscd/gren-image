@@ -128,8 +128,8 @@ get sx sy sw sh image =
 -}
 put : Int -> Int -> Image -> Image -> Image
 put dx dy from to =
-    case ( toBit32 from, toBit32 to ) of
-        ( ImageRaw _ dataFrom, ImageRaw headerTo dataTo ) ->
+    case { v1 = toBit32 from, v2 = toBit32 to } of
+        { v1 = ImageRaw _ dataFrom, v2 = ImageRaw headerTo dataTo } ->
             let
                 dim =
                     Meta.dimensions headerTo
@@ -155,29 +155,29 @@ put dx dy from to =
 -}
 mirror : Bool -> Bool -> Image -> Image
 mirror horizontally vertically image =
-    case ( image, horizontally, vertically ) of
-        ( ImageRaw meta data, True, True ) ->
-            Array.foldr (\l acc -> Array.push (arrayReverse l) acc) Array.empty data
+    case { v1 = image, v2 = horizontally, v3 = vertically } of
+        { v1 = ImageRaw meta data, v2 = True, v3 = True } ->
+            Array.foldr (\l acc -> Array.pushLast (arrayReverse l) acc) Array.empty data
                 |> ImageRaw meta
 
-        ( ImageRaw meta data, True, False ) ->
+        { v1 = ImageRaw meta data, v2 = True, v3 = False } ->
             Array.map arrayReverse data
                 |> ImageRaw meta
 
-        ( ImageRaw meta data, False, True ) ->
+        { v1 = ImageRaw meta data, v2 = False, v3 = True } ->
             arrayReverse data
                 |> ImageRaw meta
 
-        ( _, False, False ) ->
+        { v1 = _, v2 = False, v3 = False } ->
             image
 
-        ( Lazy meta fn, _, _ ) ->
+        { v1 = Lazy meta fn, v2 = _, v3 = _ } ->
             mirror horizontally vertically (fn meta)
 
 
 arrayReverse : Array a -> Array a
 arrayReverse =
-    Array.foldr (\a acc -> Array.push a acc) Array.empty
+    Array.foldr (\a acc -> Array.pushLast a acc) Array.empty
 
 
 {-| Encode image into True color with alpha PNG image

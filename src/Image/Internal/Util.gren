@@ -1,13 +1,43 @@
-module Image.Internal.Util exposing (indexedFoldl)
+module Image.Internal.Util exposing (..)
 
-import Array exposing (Array)
+import Dict exposing ( Dict )
 
 
 indexedFoldl : (Int -> a -> acc -> acc) -> acc -> Array a -> acc
 indexedFoldl func acc list =
-    Tuple.second (Array.foldl (indexedFoldlStep func) ( 0, acc ) list)
+    ((Array.foldl (indexedFoldlStep func) { v1 = 0, v2 = acc } list)).v2
 
 
-indexedFoldlStep : (Int -> b -> a -> c) -> b -> ( Int, a ) -> ( Int, c )
-indexedFoldlStep fn x ( i, thisAcc ) =
-    ( i + 1, fn i x thisAcc )
+indexedFoldlStep : (Int -> b -> a -> c) -> b -> { v1 : Int, v2 : a } -> { v1 : Int, v2 : c }
+indexedFoldlStep fn x { v1 = i, v2 = thisAcc } =
+    { v1 = i + 1, v2 = fn i x thisAcc }
+
+
+pair : a -> b -> { v1 : a, v2 : b }
+pair a b =
+    { v1 = a, v2 = b }
+
+
+tupleFirst : { v1 : a, v2 : b } -> a
+tupleFirst tuple
+    = tuple.v1
+
+
+tupleSecond : { v1 : a, v2 : b } -> b
+tupleSecond tuple =
+    tuple.v2
+
+
+tupleMapFirst : ( a -> c ) -> { v1 : a, v2 : b } ->  { v1 : c, v2 : b }
+tupleMapFirst f tuple =
+    { v1 = f tuple.v1, v2 = tuple.v2 }
+
+
+tupleMapSecond : ( b -> c ) -> { v1 : a, v2 : b } ->  { v1 : a, v2 : c }
+tupleMapSecond f tuple =
+    { v1 = tuple.v1, v2 = f tuple.v2 }
+
+
+dictToArray : Dict k v -> Array { v1 : k, v2 : v }
+dictToArray =
+    Dict.foldl ( \ k v -> pair k v |> Array.pushLast ) Array.empty

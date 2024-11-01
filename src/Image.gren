@@ -2,8 +2,7 @@ module Image exposing
     ( Image
     , decode
     , toPng, toBmp, toGif, toPngUrl, toBmpUrl, toGifUrl
-    , fromList, fromList2d, fromArray, fromArray2d
-    , toList, toList2d, toArray, toArray2d
+    , fromArray, fromArray2d , toArray, toArray2d
     , dimensions
     , Pixel, Width, Height
     )
@@ -25,12 +24,12 @@ module Image exposing
 
 # Construct
 
-@docs fromList, fromList2d, fromArray, fromArray2d
+@docs fromArray, fromArray2d
 
 
 # Destruct
 
-@docs toList, toList2d, toArray, toArray2d
+@docs toArray, toArray2d
 
 
 # Meta Data
@@ -79,34 +78,6 @@ type alias Image =
     Image.Internal.ImageData.Image
 
 
-{-| Create [`Image`](#Image) of `List Int` where each `Pixel` is `Int` as `0xRRGGBBAA`
--}
-fromList : Width -> List Pixel -> Image
-fromList w l =
-    ImageRaw
-        (FromData
-            { width = w
-            , height = List.length l // w
-            , color = FromDataChannel4 FromDataBitDepth8
-            }
-        )
-        (Array2d.fromList w l)
-
-
-{-| Create [`Image`](#Image) of `List (List Int)` where each `Pixel` is `Int` as `0xRRGGBBAA`
--}
-fromList2d : List (List Pixel) -> Image
-fromList2d l =
-    ImageRaw
-        (FromData
-            { width = l |> List.head |> Maybe.map List.length |> Maybe.withDefault 0
-            , height = List.length l
-            , color = FromDataChannel4 FromDataBitDepth8
-            }
-        )
-        (Array2d.fromList2D l)
-
-
 {-| Create [`Image`](#Image) of `Array Int` where each `Pixel` is `Int` as `0xRRGGBBAA`
 -}
 fromArray : Width -> Array Pixel -> Image
@@ -133,20 +104,6 @@ fromArray2d arr =
             }
         )
         arr
-
-
-{-| Take [`Image`](#Image) of and converts it to `List Pixel` where each `Pixel` is `Int` as `0xRRGGBBAA`
--}
-toList : Image -> List Pixel
-toList =
-    Image.Internal.ImageData.toList
-
-
-{-| Take [`Image`](#Image) of and converts it to matrix `List (List Pixel)` where each `Pixel` is `Int` as `0xRRGGBBAA`
--}
-toList2d : Image -> List (List Pixel)
-toList2d =
-    Image.Internal.ImageData.toList2d
 
 
 {-| Take [`Image`](#Image) of and converts it to `Array Pixel` where each `Pixel` is `Int` as `0xRRGGBBAA`
@@ -243,11 +200,11 @@ dimensions =
     Image.Internal.ImageData.dimensions
 
 
-orThenLazy : (() -> Maybe a) -> Maybe a -> Maybe a
+orThenLazy : ({} -> Maybe a) -> Maybe a -> Maybe a
 orThenLazy ma mb =
     case mb of
         Nothing ->
-            ma ()
+            ma {}
 
         Just _ ->
             mb

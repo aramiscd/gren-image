@@ -1,0 +1,3 @@
+:: wird zu Array.pushFirst
+Array.push wird zu Array.pushLast
+Es kann sein, dass ich das an manchen Stellen falsch zugeordnet habe.

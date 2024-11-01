@@ -1,3 +1,5 @@
+__todo: update readme__
+
 [![Build Status](https://travis-ci.org/justgook/elm-image.svg?branch=master)](https://travis-ci.org/justgook/elm-image)
 
 A library for building base64 encoded images in elm

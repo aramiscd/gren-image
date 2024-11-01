@@ -3,7 +3,6 @@ module Image.Internal.PNG exposing (decode, encode)
 --https://www.w3.org/TR/PNG-Structure.html
 --https://www.w3.org/TR/PNG/
 
-import Array exposing (Array)
 import Bitwise
 import Bytes exposing (Bytes, Endianness(..))
 import Bytes.Decode as D exposing (Decoder, Step(..))
@@ -14,6 +13,7 @@ import Image.Internal.Array2d as Array2d exposing (Array2d)
 import Image.Internal.Decode as D
 import Image.Internal.ImageData as ImageData exposing (EncodeOptions, Image(..), Order(..), PixelFormat(..), defaultOptions)
 import Image.Internal.Meta as Metadata exposing (BitDepth1_2_4_8(..), BitDepth1_2_4_8_16(..), BitDepth8_16(..), PngColor(..), PngHeader)
+import Math
 
 
 type alias PngEncodeOptions =
@@ -70,7 +70,7 @@ encodeChunk : Int -> Bytes -> Encoder
 encodeChunk kind data =
     let
         length =
-            Bytes.width data
+            Bytes.length data
 
         kindAndData =
             E.encode (E.sequence [ E.unsignedInt32 BE kind, E.bytes data ])
@@ -88,38 +88,38 @@ encodeIDAT { order } arr =
         scanLineFilter =
             E.unsignedInt8 1
 
-        ( fold1, fold2 ) =
+        { v1 = fold1, v2 = fold2 } =
             case order of
                 RightDown ->
-                    ( Array.foldl, Array.foldl )
+                    { v1 = Array.foldl, v2 = Array.foldl }
 
                 RightUp ->
-                    ( Array.foldr, Array.foldl )
+                    { v1 = Array.foldr, v2 = Array.foldl }
 
                 LeftDown ->
-                    ( Array.foldl, Array.foldr )
+                    { v1 = Array.foldl, v2 = Array.foldr }
 
                 LeftUp ->
-                    ( Array.foldr, Array.foldr )
+                    { v1 = Array.foldr, v2 = Array.foldr }
     in
     fold1
         (\sArr acc ->
             fold2
-                (\px ( prev, acc2 ) ->
+                (\px { v1 = prev, v2 = acc2 } ->
                     let
                         packed =
                             encodePixel32 px prev
                     in
-                    ( px, packed :: acc2 )
+                    { v1 = px, v2 = Array.pushFirst packed acc2 }
                 )
-                ( 0, [ scanLineFilter ] )
+                { v1 = 0, v2 = [ scanLineFilter ] }
                 sArr
-                |> (\( _, line ) -> line :: acc)
+                |> (\{ v1 = _, v2 = line } -> Array.pushFirst line acc)
         )
         []
         arr
-        |> (List.reverse
-                >> List.concatMap List.reverse
+        |> (Array.reverse
+                >> Array.flatMap Array.reverse
                 >> E.sequence
                 >> E.encode
                 >> deflateZlib
@@ -177,19 +177,19 @@ encodeIHDR width height { format } =
            6       8,16        Each pixel is an R,G,B triple,
                                followed by an alpha sample.
         -}
-        ( depth, color ) =
+        { v1 = depth, v2 = color } =
             case format of
                 RGBA ->
-                    ( 8, 6 )
+                    { v1 = 8, v2 = 6 }
 
                 RGB ->
-                    ( 8, 2 )
+                    { v1 = 8, v2 = 2 }
 
                 LUMINANCE_ALPHA ->
-                    ( 16, 0 )
+                    { v1 = 16, v2 = 0 }
 
                 ALPHA ->
-                    ( 8, 0 )
+                    { v1 = 8, v2 = 0 }
 
         --0 (no interlace) or 1 (Adam7 interlace)
         interlace =
@@ -217,7 +217,7 @@ encodeIHDR width height { format } =
 -}
 decode : Bytes -> Maybe Image
 decode bytes =
-    D.decode (mainDecoder <| Bytes.width bytes - 8) bytes
+    D.decode (mainDecoder <| Bytes.length bytes - 8) bytes
 
 
 mainDecoder : Int -> Decoder Image
@@ -226,7 +226,7 @@ mainDecoder chunksLength =
         |> D.andThen
             (\signature ->
                 if signature == [ 10, 26, 10, 13, 71, 78, 80, 137 ] then
-                    D.succeed ()
+                    D.succeed {}
 
                 else
                     D.fail
@@ -267,7 +267,7 @@ type Pixels
     | ImageData Image
 
 
-decodeChunk : Maybe PNG -> Decoder ( Int, Maybe PNG )
+decodeChunk : Maybe PNG -> Decoder { v1 : Int, v2 : Maybe PNG }
 decodeChunk acc =
     D.unsignedInt32 BE
         |> D.andThen
@@ -280,7 +280,7 @@ decodeChunk acc =
                             |> Maybe.withDefault D.fail
                             -- `length` 4-byte unsigned integer giving the number of bytes in the chunk's data field.
                             -- The length counts only the data field, not itself, the chunk type code, or the CRC.
-                            |> D.map (Tuple.pair (length + 12))
+                            |> D.map (pair (length + 12))
                     )
                     (D.bytes (length + 4))
                     (D.unsignedInt32 BE)
@@ -290,28 +290,28 @@ decodeChunk acc =
 
 chunkCollector : Int -> Maybe PNG -> Int -> Decoder (Maybe PNG)
 chunkCollector length acc kind =
-    case ( acc, kind, length ) of
-        ( Nothing, 1229472850, 13 ) ->
+    case { v1 = acc, v2 = kind, v3 = length } of
+        { v1 = Nothing, v2 = 1229472850, v3 = 13 } ->
             decodeIHDR
                 |> D.map Just
 
-        ( Just image, 1347179589, _ ) ->
+        { v1 = Just image, v2 = 1347179589, v3 = _ } ->
             decodePLTE image length
                 |> D.map Just
 
-        ( Just image, 1951551059, _ ) ->
+        { v1 = Just image, v2 = 1951551059, v3 = _ } ->
             decode_tRNS image length
                 |> D.map Just
 
-        ( Just image, 1229209940, _ ) ->
+        { v1 = Just image, v2 = 1229209940, v3 = _ } ->
             decodeIDAT image length
                 |> D.map Just
 
-        ( Just image, 1229278788, _ ) ->
+        { v1 = Just image, v2 = 1229278788, v3 = _ } ->
             decodeIEND image length
                 |> D.map Just
 
-        ( Just image, _, _ ) ->
+        { v1 = Just image, v2 = _, v3 = _ } ->
             decodeUnknown kind image length
                 |> D.map Just
 
@@ -382,15 +382,15 @@ decode_tRNS image length =
     case image.header.color of
         IndexedColour _ ->
             D.foldl length
-                (\( i, acc ) ->
+                (\{ v1 = i, v2 = acc } ->
                     D.unsignedInt8
                         |> D.map
                             (\alpha ->
-                                ( i + 1, arrayExtraUpdate i (Bitwise.shiftLeftBy 8 >> Bitwise.or alpha >> Bitwise.shiftRightZfBy 0) acc )
+                                { v1 = i + 1, v2 = arrayExtraUpdate i (Bitwise.shiftLeftBy 8 >> Bitwise.or alpha >> Bitwise.shiftRightZfBy 0) acc }
                             )
                 )
-                ( 0, image.palette )
-                |> D.map (\( _, palette ) -> { image | palette = palette })
+                { v1 = 0, v2 = image.palette }
+                |> D.map (\{ v1 = _, v2 = palette } -> { image | palette = palette })
 
         _ ->
             D.fail
@@ -427,7 +427,7 @@ decodeIEND ({ header, palette } as image) length =
                             output =
                                 Lazy (Metadata.Png header)
                                     (\info ->
-                                        D.decode (imageDecoder header palette (Bytes.width bytes)) bytes
+                                        D.decode (imageDecoder header palette (Bytes.length bytes)) bytes
                                             |> Maybe.withDefault (ImageRaw info Array.empty)
                                     )
                         in
@@ -475,7 +475,7 @@ dataWrapDecode pxDecode width height =
 
 decodeLine : (Int -> Array2d a -> Decoder (Array2d a)) -> Int -> Array2d a -> Decoder (Array2d a)
 decodeLine pxDecode width acc =
-    D.unsignedInt8 |> D.andThen (\filterType -> D.foldl width (pxDecode filterType) (Array.push Array.empty acc))
+    D.unsignedInt8 |> D.andThen (\filterType -> D.foldl width (pxDecode filterType) (Array.pushLast Array.empty acc))
 
 
 indexPixel8Decode : Palette -> Int -> Array2d Int -> Decoder (Array2d Int)
@@ -595,7 +595,7 @@ pixelDecode8Paeth_ acc =
     D.map
         (\a_ ->
             let
-                ( prevA_, prevB_, prevC_ ) =
+                { v1 = prevA_, v2 = prevB_, v3 = prevC_ } =
                     arrayPaeth acc
 
                 prevA =
@@ -671,7 +671,7 @@ pixelDecode16Paeth_ acc =
     D.map2
         (\b_ a_ ->
             let
-                ( prevA_, prevB_, prevC_ ) =
+                { v1 = prevA_, v2 = prevB_, v3 = prevC_ } =
                     arrayPaeth acc
 
                 prevA =
@@ -785,7 +785,7 @@ pixelDecode32Paeth_ acc =
     D.map4
         (\r_ g_ b_ a_ ->
             let
-                ( prevA_, prevB_, prevC_ ) =
+                { v1 = prevA_, v2 = prevB_, v3 = prevC_ } =
                     arrayPaeth acc
 
                 prevA =
@@ -838,7 +838,7 @@ arrayUp arr =
         |> Maybe.andThen (Array.get (Array2d.lastLength arr))
 
 
-arrayPaeth : Array (Array number) -> ( number, number, number )
+arrayPaeth : Array (Array number) -> { v1 : number, v2 : number, v3 : number }
 arrayPaeth arr =
     Array.get (Array.length arr - 2) arr
         |> Maybe.map
@@ -847,12 +847,12 @@ arrayPaeth arr =
                     currentIndex =
                         Array2d.lastLength arr
                 in
-                ( Array2d.last arr |> Maybe.withDefault 0
-                , Array.get currentIndex subArr |> Maybe.withDefault 0
-                , Array.get (currentIndex - 1) subArr |> Maybe.withDefault 0
-                )
+                { v1 = Array2d.last arr |> Maybe.withDefault 0
+                , v2 = Array.get currentIndex subArr |> Maybe.withDefault 0
+                , v3 = Array.get (currentIndex - 1) subArr |> Maybe.withDefault 0
+                }
             )
-        |> Maybe.withDefault ( 0, 0, 0 )
+        |> Maybe.withDefault { v1 = 0, v2 = 0, v3 = 0 }
 
 
 paeth : number -> number -> number -> number
@@ -862,13 +862,13 @@ paeth a b c =
             a + b - c
 
         pa =
-            abs (p - a)
+            Math.abs (p - a)
 
         pb =
-            abs (p - b)
+            Math.abs (p - b)
 
         pc =
-            abs (p - c)
+            Math.abs (p - c)
     in
     if pa <= pb && pa <= pc then
         a
@@ -893,7 +893,7 @@ saveChunk ({ header } as image) kind value =
                 |> D.decode (D.string 4)
                 |> Maybe.withDefault ""
     in
-    { image | header = { header | chunks = Dict.insert name value header.chunks } }
+    { image | header = { header | chunks = Dict.set name value header.chunks } }
 
 
 decodeIHDRColor : Decoder PngColor
@@ -975,18 +975,18 @@ fromIntBitDepth8_16 i =
             D.fail
 
 
-chunkLoopR : number -> (Maybe a -> Decoder ( number, Maybe a )) -> Decoder (Maybe a)
+chunkLoopR : number -> (Maybe a -> Decoder { v1 : number, v2 : Maybe a }) -> Decoder (Maybe a)
 chunkLoopR length decoder =
-    D.loop ( length, Nothing ) (listStep decoder)
+    D.loop { v1 = length, v2 = Nothing } (listStep decoder)
 
 
-listStep : (b -> Decoder ( number, a )) -> ( number, b ) -> Decoder (Step ( number, a ) a)
-listStep decoder_ ( length_, acc ) =
+listStep : (b -> Decoder { v1 : number, v2 : a }) -> { v1 : number, v2 : b } -> Decoder (Step { v1 : number, v2 : a } a)
+listStep decoder_ { v1 = length_, v2 = acc } =
     decoder_ acc
         |> D.map
-            (\( bytesTaken, newAcc ) ->
+            (\{ v1 = bytesTaken, v2 = newAcc } ->
                 if length_ - bytesTaken > 0 then
-                    Loop ( length_ - bytesTaken, newAcc )
+                    Loop { v1 = length_ - bytesTaken, v2 = newAcc }
 
                 else
                     Done newAcc
@@ -1030,3 +1030,16 @@ arrayExtraUpdate n f a =
 
         Just element_ ->
             Array.set n (f element_) a
+
+
+
+-- Helpers
+
+
+type alias Pair a b =
+    { v1 : a, v2 : b }
+
+
+pair : a -> b -> Pair a b
+pair a b =
+    { v1 = a, v2 = b }
